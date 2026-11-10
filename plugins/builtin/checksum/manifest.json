@@ -1,0 +1,12 @@
+{
+  "id": "com.xcom.tools.checksum",
+  "name": "校验计算器",
+  "version": "1.0.0",
+  "apiVersion": "1.0",
+  "entry": "xcom-checksum.dll",
+  "description": "计算 CRC16/Modbus、CRC16/CCITT、SUM8、XOR8，演示插件命令、视图与菜单贡献。",
+  "build": { "qt": "6.7.3" },
+  "activationEvents": ["onStartup"],
+  "headless": true,
+  "capabilities": ["session.read"]
+}

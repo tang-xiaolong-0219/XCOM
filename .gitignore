@@ -1,0 +1,28 @@
+# Qt Creator local project state
+/.qtcreator/
+*.user
+*.user.*
+
+# Build output
+/build/
+/build-*/
+/cmake-build-*/
+/out/
+/bin/
+/obj/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Compiled files and logs
+*.exe
+*.dll
+*.a
+*.lib
+*.o
+*.obj
+*.pdb
+*.ilk
+*.log
+*.tmp

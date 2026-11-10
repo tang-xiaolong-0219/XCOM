@@ -1,0 +1,11 @@
+{
+  "id": "com.xcom.sessions",
+  "name": "会话资源管理器",
+  "version": "1.0.0",
+  "apiVersion": "1.0",
+  "entry": "xcom-sessions.dll",
+  "description": "以树形列表展示所有串口会话，双击打开控制台，右键关闭会话。",
+  "build": { "qt": "6.7.3" },
+  "activationEvents": ["onStartup"],
+  "capabilities": ["session.read"]
+}
