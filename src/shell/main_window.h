@@ -15,6 +15,7 @@
 QT_BEGIN_NAMESPACE
 class QAction;
 class QDockWidget;
+class QEvent;
 class QKeySequence;
 class QLabel;
 class QPlainTextEdit;
@@ -63,6 +64,7 @@ public:
 protected:
     void showEvent(QShowEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
+    void changeEvent(QEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
 

@@ -24,6 +24,7 @@
 #include <QDateTime>
 #include <QDockWidget>
 #include <QFontDatabase>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QKeySequence>
 #include <QLabel>
@@ -33,6 +34,7 @@
 #include <QMoveEvent>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QScreen>
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QTabBar>
@@ -44,6 +46,7 @@
 #include <QWindow>
 
 #include <algorithm>
+#include <utility>
 
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
@@ -220,6 +223,31 @@ public:
 #endif
         }
     }
+    void setApplicationMinimizedLayer(bool minimized)
+    {
+        if (!isFloating()) return;
+        setProperty("applicationMinimized", minimized);
+        if (!isVisible()) return;
+        clearTransientParent();
+        const QWidget *content = widget();
+        const bool userPinned = content && content->property("floatPinned").toBool();
+#ifdef Q_OS_WIN
+        const HWND nativeHandle = reinterpret_cast<HWND>(winId());
+        if (nativeHandle) {
+            SetWindowPos(nativeHandle, (minimized || userPinned) ? HWND_TOPMOST : HWND_NOTOPMOST,
+                         0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+            return;
+        }
+#else
+        if (isMinimized()) return;
+        const QRect previousGeometry = geometry();
+        setWindowFlag(Qt::WindowStaysOnTopHint, minimized || userPinned);
+        setGeometry(previousGeometry);
+        show();
+#endif
+        raise();
+    }
     void lockFloatingSize(const QSize &size)
     {
         m_sizeLocked = true;
@@ -333,8 +361,8 @@ MainWindow::~MainWindow()
 void MainWindow::buildUi()
 {
     setWindowTitle(QStringLiteral("X-COM 串口工作台"));
-    setMinimumSize(980, 640);
-    resize(1280, 820);
+    setMinimumSize(1500, 850);
+    resize(1600, 900);
     setDockOptions(QMainWindow::AnimatedDocks | QMainWindow::AllowTabbedDocks
                    | QMainWindow::AllowNestedDocks);
 
@@ -1326,6 +1354,7 @@ void MainWindow::addSessionTab(const QVariantMap &info)
     m_consoleHosts.insert(id, host);
     m_centerTabs->setCurrentIndex(index);
     m_sessions->setActiveId(id);
+    workspace->showSerialConfiguration();
     updateStatus();
 }
 
@@ -1675,6 +1704,27 @@ void MainWindow::restoreSettings()
     if (!geometry.isEmpty()) {
         restoreGeometry(geometry);
     }
+    if (!isFullScreen()) {
+        QScreen *targetScreen = screen();
+        if (!targetScreen) {
+            targetScreen = QGuiApplication::primaryScreen();
+        }
+        const QRect available = targetScreen ? targetScreen->availableGeometry() : QRect();
+        const bool screenBelowMinimum =
+            available.isValid()
+            && (available.width() < minimumWidth() + 32
+                || available.height() < minimumHeight() + 80);
+        if (screenBelowMinimum) {
+            setWindowState(windowState() & ~Qt::WindowMaximized);
+            resize(size().expandedTo(QSize(1600, 900)));
+            move(available.topLeft());
+        } else if (!isMaximized()) {
+            resize(size().expandedTo(QSize(1600, 900)));
+            if (available.isValid() && !available.contains(frameGeometry())) {
+                move(available.center() - QPoint(width() / 2, height() / 2));
+            }
+        }
+    }
     const QByteArray state = m_settings->value(QStringLiteral("window/state")).toByteArray();
     if (!state.isEmpty()) {
         restoreState(state);
@@ -1728,6 +1778,23 @@ void MainWindow::showEvent(QShowEvent *event)
     // 等原生 HWND 创建完成后缓存句柄，避免在窗口创建消息中调用 winId() 引发重入。
     m_resizeWindowId = reinterpret_cast<quintptr>(winId());
 #endif
+}
+
+void MainWindow::changeEvent(QEvent *event)
+{
+    QMainWindow::changeEvent(event);
+    if (event->type() != QEvent::WindowStateChange) return;
+
+    // 主窗口最小化时临时把独立会话放进置顶层，避免被系统切换到前台的其他应用遮挡；
+    // 主窗口恢复时撤销临时置顶，并保留用户自己的「固定在最前」设置。
+    const bool minimized = isMinimized();
+    for (SessionDockWidget *dock : std::as_const(m_floatingSessions)) {
+        if (dock) {
+            QTimer::singleShot(0, dock, [dock, minimized] {
+                dock->setApplicationMinimizedLayer(minimized);
+            });
+        }
+    }
 }
 
 bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)

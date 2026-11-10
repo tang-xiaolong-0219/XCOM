@@ -2,6 +2,7 @@
 
 #include "xcom/api/commands.h"
 
+#include <QAbstractSpinBox>
 #include <QCheckBox>
 #include <QDateTime>
 #include <QDir>
@@ -150,6 +151,7 @@ void ConsoleView::buildUi()
     m_intervalSpin->setValue(1000);
     m_intervalSpin->setSuffix(QStringLiteral(" ms"));
     m_intervalSpin->setMinimumWidth(96);
+    m_intervalSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
     m_sendFileButton = new QPushButton(QStringLiteral("发送文件"), sendPanel);
     m_sendFileButton->setObjectName(QStringLiteral("sendFileButton"));
     m_sendFileButton->setToolTip(QStringLiteral("选择文件并按原始字节发送；发送中可点击停止"));

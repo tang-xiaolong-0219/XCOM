@@ -4,6 +4,7 @@
 #include "ui-kit/console_view.h"
 #include "ui-kit/frame_parser_view.h"
 
+#include <QAbstractSpinBox>
 #include <QCloseEvent>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -38,14 +39,15 @@ namespace {
 void setWindowPinned(QWidget *window, bool pinned)
 {
     if (!window) return;
+    const bool keepAboveOtherWindows = pinned || window->property("applicationMinimized").toBool();
 #ifdef Q_OS_WIN
     const HWND handle = reinterpret_cast<HWND>(window->winId());
-    SetWindowPos(handle, pinned ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+    SetWindowPos(handle, keepAboveOtherWindows ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 #else
     const QRect geometry = window->geometry();
     const bool visible = window->isVisible();
-    window->setWindowFlag(Qt::WindowStaysOnTopHint, pinned);
+    window->setWindowFlag(Qt::WindowStaysOnTopHint, keepAboveOtherWindows);
     window->setGeometry(geometry);
     if (visible) {
         window->show();
@@ -163,6 +165,8 @@ void SessionWorkspace::buildUi()
     loopCount->setValue(1);
     loopCount->setPrefix(QStringLiteral("循环 "));
     loopCount->setSuffix(QStringLiteral(" 次"));
+    loopCount->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    loopCount->setFixedWidth(loopCount->sizeHint().width() * 2 / 3);
     auto *stopButton = new QPushButton(QStringLiteral("停止"), m_commandShelf);
     runBar->addWidget(selectAllButton);
     runBar->addWidget(parseButton);
@@ -193,10 +197,10 @@ void SessionWorkspace::buildUi()
         layout->setContentsMargins(0, 0, 0, 0); layout->setSpacing(4);
         auto *enabled = new QCheckBox(row); enabled->setChecked(false); enabled->setToolTip(QStringLiteral("统一运行时发送此行"));
         auto *indexLabel = new QLabel(QString::number(m_commandRows.size() + 1), row);
-        auto *edit = new QLineEdit(text, row); edit->setPlaceholderText(QStringLiteral("AT 指令"));
+        auto *edit = new QLineEdit(text, row); edit->setPlaceholderText(QStringLiteral("数据指令"));
         edit->setMinimumWidth(100);
         auto *hex = new QCheckBox(QStringLiteral("HEX"), row); hex->setToolTip(QStringLiteral("按十六进制发送"));
-        auto *delay = new QSpinBox(row); delay->setRange(0, 3600000); delay->setSuffix(QStringLiteral(" ms")); delay->setMinimumWidth(100); delay->setToolTip(QStringLiteral("发送前等待时间，0 表示立即"));
+        auto *delay = new QSpinBox(row); delay->setRange(0, 3600000); delay->setSuffix(QStringLiteral(" ms")); delay->setFixedWidth(67); delay->setButtonSymbols(QAbstractSpinBox::NoButtons); delay->setToolTip(QStringLiteral("发送前等待时间，0 表示立即"));
         auto *newline = new QCheckBox(QStringLiteral("换行"), row); newline->setChecked(true);
         auto *send = new QToolButton(row); send->setText(QStringLiteral("发送"));
         auto *remove = new QToolButton(row); remove->setText(QStringLiteral("×")); remove->setToolTip(QStringLiteral("删除此行"));
@@ -337,8 +341,10 @@ void SessionWorkspace::buildUi()
     m_contentSplitter->addWidget(m_commandShelf);
     m_contentSplitter->setCollapsible(0, false);
     m_contentSplitter->setCollapsible(1, false);
-    m_splitter->setMinimumWidth(380);
-    m_commandShelf->setMinimumWidth(320);
+    // Keep the console toolbar and command runner controls fully visible when
+    // the main window reaches its minimum size.
+    m_splitter->setMinimumWidth(600);
+    m_commandShelf->setMinimumWidth(440);
     m_contentSplitter->setStretchFactor(0, 1);
     m_contentSplitter->setStretchFactor(1, 0);
     m_contentSplitter->setSizes({800, 240});
@@ -374,15 +380,15 @@ QWidget *SessionWorkspace::createPanelBar()
                                 QStringLiteral("显示 / 隐藏串口命令行页，不影响命令解析和串口配置"));
     m_parserToggle = makeToggle(QStringLiteral("命令解析"),
                                 QStringLiteral("单独显示 / 隐藏「命令解析」标签页"));
-    m_commandsToggle = makeToggle(QStringLiteral("AT 命令"), QStringLiteral("显示 / 隐藏右侧 AT 命令清单"));
+    m_commandsToggle = makeToggle(QStringLiteral("命令行"), QStringLiteral("显示 / 隐藏右侧命令行"));
     m_pinToggle = makeToggle(QStringLiteral("固定在最前"), QStringLiteral("浮动窗口置顶显示"));
     m_pinToggle->setObjectName(QStringLiteral("sessionFloatPinToggle"));
 
     layout->addWidget(m_consoleToggle);
+    layout->addWidget(m_commandsToggle);
     layout->addWidget(m_serialConfigToggle);
     layout->addWidget(m_bottomToggle);
     layout->addWidget(m_parserToggle);
-    layout->addWidget(m_commandsToggle);
     layout->addWidget(m_pinToggle);
     layout->addStretch();
 
@@ -394,7 +400,10 @@ QWidget *SessionWorkspace::createPanelBar()
             [this](bool checked) { setBottomVisible(checked); });
     connect(m_parserToggle, &QToolButton::clicked, this,
             [this](bool checked) { setParserVisible(checked); });
-    connect(m_commandsToggle, &QToolButton::clicked, m_commandShelf, &QWidget::setVisible);
+    connect(m_commandsToggle, &QToolButton::toggled, this, [this](bool visible) {
+        m_commandsVisible = visible;
+        m_commandShelf->setVisible(visible);
+    });
     connect(m_pinToggle, &QToolButton::toggled, this, [this](bool pinned) {
         m_floatPinned = pinned;
         setProperty("floatPinned", pinned);
@@ -419,6 +428,7 @@ void SessionWorkspace::syncPanelBar()
     const QSignalBlocker b3(m_bottomToggle);
     const QSignalBlocker b4(m_parserToggle);
     const QSignalBlocker b5(m_pinToggle);
+    const QSignalBlocker b6(m_commandsToggle);
 
     const bool floating = isConsoleFloating();
     m_consoleToggle->setChecked(isConsoleVisible());
@@ -427,7 +437,7 @@ void SessionWorkspace::syncPanelBar()
     m_bottomToggle->setChecked(isBottomVisible());
     m_parserToggle->setChecked(isParserVisible());
     if (m_floatToggle) m_floatToggle->setChecked(floating);
-    if (m_commandsToggle) m_commandsToggle->setChecked(m_commandShelf->isVisible());
+    if (m_commandsToggle) m_commandsToggle->setChecked(m_commandsVisible);
     if (m_pinToggle) m_pinToggle->setChecked(m_floatPinned);
 }
 
@@ -447,6 +457,18 @@ void SessionWorkspace::showConsole()
     }
     if (m_console) {
         m_console->setFocus();
+    }
+}
+
+void SessionWorkspace::showSerialConfiguration()
+{
+    if (!m_serialConfigToggle) {
+        return;
+    }
+    if (m_serialConfigToggle->isChecked()) {
+        emit serialConfigurationToggled(true);
+    } else {
+        m_serialConfigToggle->setChecked(true);
     }
 }
 

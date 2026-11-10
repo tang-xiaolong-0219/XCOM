@@ -43,6 +43,7 @@ public:
     FrameParserView *parser() const { return m_parser; }
 
     void showConsole();
+    void showSerialConfiguration();
     void showCommandLine();
     void showParser();
     void showConsolePage(QWidget *page, const QString &title);

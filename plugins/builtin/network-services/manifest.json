@@ -1,0 +1,12 @@
+{
+  "id": "com.xcom.tools.network-services",
+  "name": "TCP/UDP 服务",
+  "version": "1.0.0",
+  "apiVersion": "1.0",
+  "entry": "xcom-network-services.dll",
+  "description": "TCP 客户端与服务端、UDP 收发调试工具。",
+  "build": { "qt": "6.7.3" },
+  "activationEvents": ["onStartup"],
+  "headless": false,
+  "capabilities": []
+}

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(XCom VERSION 0.2.0 LANGUAGES CXX)
+project(XCom VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,6 +33,7 @@ if (XCOM_BUILD_PLUGINS)
     add_subdirectory(plugins/builtin/sessions)
     add_subdirectory(plugins/builtin/checksum)
     add_subdirectory(plugins/builtin/string-hex)
+    add_subdirectory(plugins/builtin/network-services)
 endif()
 
 option(XCOM_BUILD_TESTS "Build integration tests" ON)
