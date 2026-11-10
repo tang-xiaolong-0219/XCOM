@@ -32,6 +32,7 @@ option(XCOM_BUILD_PLUGINS "Build bundled plugins" ON)
 if (XCOM_BUILD_PLUGINS)
     add_subdirectory(plugins/builtin/sessions)
     add_subdirectory(plugins/builtin/checksum)
+    add_subdirectory(plugins/builtin/string-hex)
 endif()
 
 option(XCOM_BUILD_TESTS "Build integration tests" ON)

@@ -1,0 +1,12 @@
+{
+  "id": "com.xcom.tools.string-hex",
+  "name": "字符串与十六进制转换",
+  "version": "1.0.0",
+  "apiVersion": "1.0",
+  "entry": "xcom-string-hex.dll",
+  "description": "在 UTF-8 字符串与十六进制字节之间双向转换。",
+  "build": { "qt": "6.7.3" },
+  "activationEvents": ["onStartup"],
+  "headless": true,
+  "capabilities": []
+}
