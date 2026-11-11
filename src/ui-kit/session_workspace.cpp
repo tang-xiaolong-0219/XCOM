@@ -39,15 +39,14 @@ namespace {
 void setWindowPinned(QWidget *window, bool pinned)
 {
     if (!window) return;
-    const bool keepAboveOtherWindows = pinned || window->property("applicationMinimized").toBool();
 #ifdef Q_OS_WIN
     const HWND handle = reinterpret_cast<HWND>(window->winId());
-    SetWindowPos(handle, keepAboveOtherWindows ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+    SetWindowPos(handle, pinned ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 #else
     const QRect geometry = window->geometry();
     const bool visible = window->isVisible();
-    window->setWindowFlag(Qt::WindowStaysOnTopHint, keepAboveOtherWindows);
+    window->setWindowFlag(Qt::WindowStaysOnTopHint, pinned);
     window->setGeometry(geometry);
     if (visible) {
         window->show();
@@ -620,6 +619,26 @@ void SessionWorkspace::setParserVisible(bool visible)
 bool SessionWorkspace::isConsoleFloating() const
 {
     return m_floatWindow != nullptr;
+}
+
+void SessionWorkspace::raiseFloatingConsoleWithoutActivation()
+{
+    if (!m_floatWindow || !m_floatWindow->isVisible() || m_floatWindow->isMinimized()) return;
+#ifdef Q_OS_WIN
+    const HWND handle = reinterpret_cast<HWND>(m_floatWindow->winId());
+    if (handle) {
+        const UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+        if (m_floatPinned) {
+            SetWindowPos(handle, HWND_TOPMOST, 0, 0, 0, 0, flags);
+        } else {
+            // Keep the float window at the front of normal windows without pinning it there.
+            SetWindowPos(handle, HWND_TOP, 0, 0, 0, 0, flags);
+            SetWindowPos(handle, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+        }
+        return;
+    }
+#endif
+    m_floatWindow->raise();
 }
 
 void SessionWorkspace::setConsoleFloating(bool floating)

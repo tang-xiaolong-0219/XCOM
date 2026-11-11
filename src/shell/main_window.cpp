@@ -224,28 +224,25 @@ public:
 #endif
         }
     }
-    void setApplicationMinimizedLayer(bool minimized)
+    void bringToFrontWithoutActivation()
     {
-        if (!isFloating()) return;
-        setProperty("applicationMinimized", minimized);
-        if (!isVisible()) return;
+        if (!isFloating() || !isVisible() || isMinimized()) return;
         clearTransientParent();
         const QWidget *content = widget();
         const bool userPinned = content && content->property("floatPinned").toBool();
 #ifdef Q_OS_WIN
         const HWND nativeHandle = reinterpret_cast<HWND>(winId());
         if (nativeHandle) {
-            SetWindowPos(nativeHandle, (minimized || userPinned) ? HWND_TOPMOST : HWND_NOTOPMOST,
-                         0, 0, 0, 0,
-                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+            const UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+            if (userPinned) {
+                SetWindowPos(nativeHandle, HWND_TOPMOST, 0, 0, 0, 0, flags);
+            } else {
+                // Raise it in the ordinary Z order, then clear any stale topmost state.
+                SetWindowPos(nativeHandle, HWND_TOP, 0, 0, 0, 0, flags);
+                SetWindowPos(nativeHandle, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+            }
             return;
         }
-#else
-        if (isMinimized()) return;
-        const QRect previousGeometry = geometry();
-        setWindowFlag(Qt::WindowStaysOnTopHint, minimized || userPinned);
-        setGeometry(previousGeometry);
-        show();
 #endif
         raise();
     }
@@ -1887,16 +1884,15 @@ void MainWindow::showEvent(QShowEvent *event)
 void MainWindow::changeEvent(QEvent *event)
 {
     QMainWindow::changeEvent(event);
-    if (event->type() != QEvent::WindowStateChange) return;
+    if (event->type() != QEvent::WindowStateChange || !isMinimized()) return;
 
-    // 主窗口最小化时临时把独立会话放进置顶层，避免被系统切换到前台的其他应用遮挡；
-    // 主窗口恢复时撤销临时置顶，并保留用户自己的「固定在最前」设置。
-    const bool minimized = isMinimized();
+    // 最小化主窗口后，把浮动会话提到普通窗口层级前面；未固定时仍可被其他应用覆盖。
+    for (SessionWorkspace *workspace : m_consoles) {
+        if (workspace) workspace->raiseFloatingConsoleWithoutActivation();
+    }
     for (SessionDockWidget *dock : std::as_const(m_floatingSessions)) {
         if (dock) {
-            QTimer::singleShot(0, dock, [dock, minimized] {
-                dock->setApplicationMinimizedLayer(minimized);
-            });
+            QTimer::singleShot(0, dock, [dock] { dock->bringToFrontWithoutActivation(); });
         }
     }
 }

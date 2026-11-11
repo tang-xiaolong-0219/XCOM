@@ -66,6 +66,7 @@ public:
     // 浮动：把控制台移到独立窗口；关闭该窗口或再次切换会嵌回原位。
     bool isConsoleFloating() const;
     void setConsoleFloating(bool floating);
+    void raiseFloatingConsoleWithoutActivation();
 
 signals:
     void consoleRequested(const QString &sessionId);
