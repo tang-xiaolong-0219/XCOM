@@ -10,7 +10,6 @@
 QT_BEGIN_NAMESPACE
 class QComboBox;
 class QLineEdit;
-class QPushButton;
 class QDialogButtonBox;
 class QTimer;
 QT_END_NAMESPACE
@@ -33,6 +32,7 @@ signals:
     void configurationApplied(const xcom::SessionDescriptor &descriptor);
 
 private:
+    void applyEmbeddedConfiguration();
     void refreshPorts();
     void updateDefaultName();
 
@@ -43,7 +43,6 @@ private:
     QComboBox *m_parity = nullptr;
     QComboBox *m_flow = nullptr;
     QLineEdit *m_name = nullptr;
-    QPushButton *m_applyButton = nullptr;
     QDialogButtonBox *m_buttons = nullptr;
     QTimer *m_refreshTimer = nullptr;
     QString m_preferredPort;

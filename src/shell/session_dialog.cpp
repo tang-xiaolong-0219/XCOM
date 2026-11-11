@@ -76,8 +76,6 @@ SessionDialog::SessionDialog(const QString &defaultPort, QWidget *parent)
 
     m_name = new QLineEdit(this);
     m_name->setPlaceholderText(QStringLiteral("会话名称（默认使用串口名）"));
-    m_applyButton = new QPushButton(QStringLiteral("应用"), this);
-    m_applyButton->setVisible(false);
 
     m_dataBits->setMinimumWidth(50);
     m_stopBits->setMinimumWidth(50);
@@ -86,7 +84,6 @@ SessionDialog::SessionDialog(const QString &defaultPort, QWidget *parent)
     auto *nameRow = new QHBoxLayout;
     nameRow->setSpacing(4);
     addField(nameRow, QStringLiteral("会话名称"), m_name, 56, 1);
-    nameRow->addWidget(m_applyButton);
     rows->addLayout(nameRow);
 
     auto *portRow = new QHBoxLayout;
@@ -117,14 +114,19 @@ SessionDialog::SessionDialog(const QString &defaultPort, QWidget *parent)
     connect(m_buttons, &QDialogButtonBox::rejected, this, [this] {
         if (!m_embedded) reject();
     });
-    connect(m_applyButton, &QPushButton::clicked, this, [this] {
-        emit configurationApplied(descriptor());
-    });
     connect(m_port, &QComboBox::currentIndexChanged, this, [this] {
         m_autoSelectPort = false;
         updateDefaultName();
     });
     connect(m_name, &QLineEdit::textEdited, this, [this] { m_nameEdited = true; });
+    auto applySelection = [this](int) { applyEmbeddedConfiguration(); };
+    for (QComboBox *combo : {m_port, m_baud, m_dataBits, m_stopBits, m_parity, m_flow}) {
+        connect(combo, qOverload<int>(&QComboBox::activated), this, applySelection);
+    }
+    connect(m_baud->lineEdit(), &QLineEdit::returnPressed, this,
+            &SessionDialog::applyEmbeddedConfiguration);
+    connect(m_name, &QLineEdit::editingFinished, this,
+            &SessionDialog::applyEmbeddedConfiguration);
 
     refreshPorts();
     m_refreshTimer = new QTimer(this);
@@ -154,7 +156,6 @@ void SessionDialog::setEmbeddedMode(bool embedded)
 {
     m_embedded = embedded;
     if (!embedded) {
-        m_applyButton->hide();
         m_buttons->show();
         return;
     }
@@ -163,8 +164,12 @@ void SessionDialog::setEmbeddedMode(bool embedded)
     setWindowModality(Qt::NonModal);
     setEnabled(true);
     setWindowTitle(QStringLiteral("串口配置"));
-    m_applyButton->show();
     m_buttons->hide();
+}
+
+void SessionDialog::applyEmbeddedConfiguration()
+{
+    if (m_embedded) emit configurationApplied(descriptor());
 }
 
 void SessionDialog::setBusyPortsProvider(std::function<QStringList()> provider)
