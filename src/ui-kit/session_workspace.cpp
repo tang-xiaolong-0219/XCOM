@@ -17,6 +17,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QResizeEvent>
 #include <QScrollBar>
 #include <QSignalBlocker>
 #include <QSplitter>
@@ -35,6 +36,23 @@
 
 namespace xcom {
 namespace {
+
+class PrefixAnchoredLineEdit final : public QLineEdit
+{
+public:
+    using QLineEdit::QLineEdit;
+
+protected:
+    void resizeEvent(QResizeEvent *event) override
+    {
+        const bool narrowed = event->oldSize().isValid()
+                              && event->size().width() < event->oldSize().width();
+        QLineEdit::resizeEvent(event);
+        if (narrowed && !text().isEmpty()) {
+            setCursorPosition(0);
+        }
+    }
+};
 
 void setWindowPinned(QWidget *window, bool pinned)
 {
@@ -196,14 +214,14 @@ void SessionWorkspace::buildUi()
         layout->setContentsMargins(0, 0, 0, 0); layout->setSpacing(4);
         auto *enabled = new QCheckBox(row); enabled->setChecked(false); enabled->setToolTip(QStringLiteral("统一运行时发送此行"));
         auto *indexLabel = new QLabel(QString::number(m_commandRows.size() + 1), row);
-        auto *edit = new QLineEdit(text, row); edit->setPlaceholderText(QStringLiteral("数据指令"));
+        auto *edit = new PrefixAnchoredLineEdit(text, row); edit->setAlignment(Qt::AlignLeft); edit->setPlaceholderText(QStringLiteral("数据指令"));
         edit->setMinimumWidth(100);
         auto *hex = new QCheckBox(QStringLiteral("HEX"), row); hex->setToolTip(QStringLiteral("按十六进制发送"));
         auto *delay = new QSpinBox(row); delay->setRange(0, 3600000); delay->setSuffix(QStringLiteral(" ms")); delay->setFixedWidth(67); delay->setButtonSymbols(QAbstractSpinBox::NoButtons); delay->setToolTip(QStringLiteral("发送前等待时间，0 表示立即"));
         auto *newline = new QCheckBox(QStringLiteral("换行"), row); newline->setChecked(true);
         auto *send = new QToolButton(row); send->setText(QStringLiteral("发送"));
         auto *remove = new QToolButton(row); remove->setText(QStringLiteral("×")); remove->setToolTip(QStringLiteral("删除此行"));
-        layout->addWidget(enabled); layout->addWidget(indexLabel); layout->addWidget(edit, 1); layout->addWidget(send); layout->addWidget(delay); layout->addWidget(hex); layout->addWidget(newline); layout->addWidget(remove);
+        layout->addWidget(enabled); layout->addWidget(indexLabel); layout->addWidget(send); layout->addWidget(edit, 1); layout->addWidget(hex); layout->addWidget(newline); layout->addWidget(delay); layout->addWidget(remove);
         m_rowsLayout->insertWidget(m_commandRows.size(), row); m_commandRows.append(row);
         auto sendRow = [this, edit, hex, newline] {
             m_commandLine->setHexMode(hex->isChecked());
@@ -244,7 +262,14 @@ void SessionWorkspace::buildUi()
         }
         syncSelectAll();
     });
-    connect(m_console, &ConsoleView::importCommandsRequested, this, [this, addRow](const QString &text) {
+    connect(m_console, &ConsoleView::importCommandsRequested, this,
+            [this, addRow, syncSelectAll](const QString &text) {
+        for (QWidget *row : m_commandRows) {
+            if (auto *edit = qobject_cast<QLineEdit *>(row->property("edit").value<QObject *>()))
+                edit->clear();
+            if (auto *enabled = qobject_cast<QCheckBox *>(row->property("selected").value<QObject *>()))
+                enabled->setChecked(false);
+        }
         QStringList lines;
         for (const QString &line : text.split(QRegularExpression(QStringLiteral("\\r?\\n"))))
             if (!line.trimmed().isEmpty()) lines.append(line.trimmed());
@@ -255,6 +280,7 @@ void SessionWorkspace::buildUi()
                 addRow(lines.at(i));
             }
         }
+        syncSelectAll();
     });
     m_rowsLayout->addStretch(1);
     connect(parseButton, &QPushButton::clicked, m_console, &ConsoleView::importSendText);
