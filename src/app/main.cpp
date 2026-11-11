@@ -23,7 +23,7 @@ int main(int argc, char *argv[])
     QApplication::setOrganizationName(QStringLiteral("X-COM"));
     QApplication::setOrganizationDomain(QStringLiteral("xcom.local"));
     QApplication::setApplicationName(QStringLiteral("X-COM"));
-    QApplication::setApplicationVersion(QStringLiteral("1.0.0"));
+    QApplication::setApplicationVersion(QStringLiteral("1.1.0"));
     QApplication::setApplicationDisplayName(QStringLiteral("X-COM 串口工作台"));
 
     QCommandLineParser parser;
