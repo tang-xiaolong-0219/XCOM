@@ -98,6 +98,11 @@ void SessionWorker::reconfigure(const SessionDescriptor &descriptor)
     start();
 }
 
+void SessionWorker::setDescriptor(const SessionDescriptor &descriptor)
+{
+    m_descriptor = descriptor;
+}
+
 void SessionWorker::sendBytes(const QByteArray &bytes)
 {
     if (!m_transport || !m_transport->isOpen()) {
@@ -179,6 +184,9 @@ void SerialSession::start()
 
 void SerialSession::shutdown()
 {
+    if (m_state != SessionState::Closed) {
+        setState(SessionState::Closing);
+    }
     if (m_thread->isRunning()) {
         SessionWorker *worker = m_worker;
         QMetaObject::invokeMethod(
@@ -209,8 +217,16 @@ void SerialSession::setRts(bool enabled)
 
 void SerialSession::reconfigure(const SessionDescriptor &descriptor)
 {
-    if (m_state == SessionState::Closed) return;
+    const bool transportChanged = descriptor.transport != m_descriptor.transport
+                                  || !(descriptor.config == m_descriptor.config);
     m_descriptor = descriptor;
+    if (m_state == SessionState::Closed || !transportChanged) {
+        SessionWorker *worker = m_worker;
+        const SessionDescriptor updated = descriptor;
+        QMetaObject::invokeMethod(worker, [worker, updated] { worker->setDescriptor(updated); },
+                                  Qt::QueuedConnection);
+        return;
+    }
     setState(SessionState::Opening);
     SessionWorker *worker = m_worker;
     const SessionDescriptor updated = descriptor;
@@ -218,14 +234,50 @@ void SerialSession::reconfigure(const SessionDescriptor &descriptor)
                               Qt::QueuedConnection);
 }
 
+void SerialSession::setConnected(bool connected)
+{
+    if (connected) {
+        if (m_state == SessionState::Open || m_state == SessionState::Opening) {
+            return;
+        }
+        if (!m_thread->isRunning()) {
+            m_thread->start();
+        }
+        setState(SessionState::Opening);
+        SessionWorker *worker = m_worker;
+        const SessionDescriptor descriptor = m_descriptor;
+        QMetaObject::invokeMethod(
+            worker, [worker, descriptor] { worker->reconfigure(descriptor); },
+            Qt::QueuedConnection);
+        return;
+    }
+
+    if (m_state == SessionState::Closed || m_state == SessionState::Closing) {
+        return;
+    }
+    setState(SessionState::Closing);
+    if (m_thread->isRunning()) {
+        SessionWorker *worker = m_worker;
+        QMetaObject::invokeMethod(worker, [worker] { worker->stop(); },
+                                  Qt::BlockingQueuedConnection);
+    }
+    setState(SessionState::Closed);
+}
+
 void SerialSession::handleOpened()
 {
+    if (m_state != SessionState::Opening) {
+        return;
+    }
     setState(SessionState::Open);
     emit openedSignal();
 }
 
 void SerialSession::handleOpenFailed(const QString &message, int errorCode)
 {
+    if (m_state != SessionState::Opening) {
+        return;
+    }
     Error error = Error::make(static_cast<ErrorCode>(errorCode), message,
                               QStringLiteral("serial.session"));
     setState(SessionState::Failed, error);

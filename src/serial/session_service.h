@@ -29,6 +29,7 @@ public:
     void setActiveId(const QString &sessionId) override;
     bool setDtr(const QString &sessionId, bool enabled, Error *error = nullptr) override;
     bool setRts(const QString &sessionId, bool enabled, Error *error = nullptr) override;
+    bool setConnected(const QString &sessionId, bool connected, Error *error = nullptr);
     bool reconfigure(const QString &sessionId, const SessionDescriptor &descriptor,
                      Error *error = nullptr);
 

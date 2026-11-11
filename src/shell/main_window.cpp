@@ -34,6 +34,7 @@
 #include <QMoveEvent>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QSerialPortInfo>
 #include <QScreen>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -722,6 +723,107 @@ void MainWindow::registerCommands()
                 CommandArg{QStringLiteral("enabled"), CommandArgType::Bool, true, {},
                            QStringLiteral("是否启用 RTS")}});
 
+    addCommand(QStringLiteral("serial.setConnected"), QStringLiteral("打开或关闭串口"),
+               QStringLiteral("串口"), [this](const CommandInvocation &invocation) {
+                   const QString sessionId =
+                       invocation.args.value(QStringLiteral("session")).toString();
+                   const bool connected = invocation.args.value(QStringLiteral("connected")).toBool();
+                   Error error;
+                   if (!m_sessions->setConnected(sessionId, connected, &error)) {
+                       return CommandResult::failure(error.message);
+                   }
+                   return CommandResult::success(connected ? QStringLiteral("正在打开串口")
+                                                          : QStringLiteral("串口已关闭"));
+               },
+               {CommandArg{QStringLiteral("session"), CommandArgType::SessionId, true, {},
+                           QStringLiteral("会话 id 或名称")},
+                CommandArg{QStringLiteral("connected"), CommandArgType::Bool, true, {},
+                           QStringLiteral("true 打开，false 关闭")}});
+
+    addCommand(QStringLiteral("serial.setBaudRate"), QStringLiteral("设置波特率"),
+               QStringLiteral("串口"), [this](const CommandInvocation &invocation) {
+                   const QString sessionId =
+                       invocation.args.value(QStringLiteral("session")).toString();
+                   ISession *session = m_sessions->find(sessionId);
+                   if (!session) return CommandResult::failure(QStringLiteral("会话不存在"));
+                   SessionDescriptor descriptor;
+                   descriptor.name = session->name();
+                   descriptor.transport = session->transport();
+                   descriptor.encoding = session->encoding();
+                   descriptor.config = session->config();
+                   descriptor.config.baudRate = invocation.args.value(QStringLiteral("baud")).toInt();
+                   Error error;
+                   if (!m_sessions->reconfigure(sessionId, descriptor, &error)) {
+                       return CommandResult::failure(error.message);
+                   }
+                   return CommandResult::success(QStringLiteral("波特率已更新"));
+               },
+               {CommandArg{QStringLiteral("session"), CommandArgType::SessionId, true, {},
+                           QStringLiteral("会话 id 或名称")},
+                CommandArg{QStringLiteral("baud"), CommandArgType::Int, true, {},
+                           QStringLiteral("波特率")}});
+
+    addCommand(QStringLiteral("serial.listPorts"), QStringLiteral("列出可用串口"),
+               QStringLiteral("串口"), [this](const CommandInvocation &invocation) {
+                   const QString sessionId =
+                       invocation.args.value(QStringLiteral("session")).toString();
+                   QVariantList ports;
+                   for (const QSerialPortInfo &portInfo : QSerialPortInfo::availablePorts()) {
+                       bool busy = false;
+                       for (const SessionInfo &info : m_sessions->list()) {
+                           if (info.id == sessionId || info.state == SessionState::Closed
+                               || info.transport == QStringLiteral("loopback")) {
+                               continue;
+                           }
+                           if (info.config.portName.compare(portInfo.portName(),
+                                                            Qt::CaseInsensitive) == 0) {
+                               busy = true;
+                               break;
+                           }
+                       }
+                       if (busy) continue;
+                       QString label = portInfo.portName();
+                       if (!portInfo.description().isEmpty()) {
+                           label += QStringLiteral(" (%1)").arg(portInfo.description());
+                       }
+                       ports.append(QVariantMap{{QStringLiteral("name"), portInfo.portName()},
+                                                {QStringLiteral("label"), label}});
+                   }
+                   return CommandResult::success({},
+                       {{QStringLiteral("ports"), ports}});
+               },
+               {CommandArg{QStringLiteral("session"), CommandArgType::SessionId, true, {},
+                           QStringLiteral("当前会话 id")}});
+
+    addCommand(QStringLiteral("serial.setPort"), QStringLiteral("切换串口"),
+               QStringLiteral("串口"), [this](const CommandInvocation &invocation) {
+                   const QString sessionId =
+                       invocation.args.value(QStringLiteral("session")).toString();
+                   ISession *session = m_sessions->find(sessionId);
+                   if (!session) return CommandResult::failure(QStringLiteral("会话不存在"));
+                   const QString port = invocation.args.value(QStringLiteral("port")).toString();
+                   if (port.trimmed().isEmpty()) {
+                       return CommandResult::failure(QStringLiteral("请选择串口"));
+                   }
+                   SessionDescriptor descriptor;
+                   descriptor.name = session->name();
+                   descriptor.transport = port == QStringLiteral("LOOPBACK")
+                                              ? QStringLiteral("loopback")
+                                              : QStringLiteral("serial");
+                   descriptor.encoding = session->encoding();
+                   descriptor.config = session->config();
+                   descriptor.config.portName = port;
+                   Error error;
+                   if (!m_sessions->reconfigure(sessionId, descriptor, &error)) {
+                       return CommandResult::failure(error.message);
+                   }
+                   return CommandResult::success();
+               },
+               {CommandArg{QStringLiteral("session"), CommandArgType::SessionId, true, {},
+                           QStringLiteral("会话 id 或名称")},
+                CommandArg{QStringLiteral("port"), CommandArgType::String, true, {},
+                           QStringLiteral("串口名或 LOOPBACK")}});
+
     addCommand(QStringLiteral("session.close"), QStringLiteral("关闭会话"), QStringLiteral("会话"),
                [this](const CommandInvocation &invocation) {
                    QString id = invocation.args.value(QStringLiteral("session")).toString();
@@ -1321,7 +1423,8 @@ void MainWindow::addSessionTab(const QVariantMap &info)
             QStringList busyPorts;
             if (!m_sessions) return busyPorts;
             for (const SessionInfo &info : m_sessions->list()) {
-                if (info.id != id && info.transport != QStringLiteral("loopback"))
+                if (info.id != id && info.state != SessionState::Closed
+                    && info.transport != QStringLiteral("loopback"))
                     busyPorts.append(info.config.portName);
             }
             return busyPorts;
@@ -1329,8 +1432,8 @@ void MainWindow::addSessionTab(const QVariantMap &info)
         connect(configPage, &SessionDialog::configurationApplied, this,
                 [this, id, initial](const SessionDescriptor &configuration) {
             SessionDescriptor updated = configuration;
-            updated.encoding = initial.encoding;
             if (ISession *current = m_sessions ? m_sessions->find(id) : nullptr) {
+                updated.encoding = current->encoding();
                 const PortConfig currentConfig = current->config();
                 const bool switchingFromLoopback =
                     current->transport() == QStringLiteral("loopback")
@@ -1338,6 +1441,7 @@ void MainWindow::addSessionTab(const QVariantMap &info)
                 updated.config.dtr = switchingFromLoopback ? true : currentConfig.dtr;
                 updated.config.rts = currentConfig.rts;
             } else {
+                updated.encoding = initial.encoding;
                 updated.config.dtr = initial.config.dtr;
                 updated.config.rts = initial.config.rts;
             }

@@ -49,7 +49,8 @@ bool SessionService::open(const SessionDescriptor &descriptor, QString *sessionI
             }
             return false;
         }
-        const bool bothSerial = session->transport() != QStringLiteral("loopback")
+        const bool bothSerial = session->state() != SessionState::Closed
+                                && session->transport() != QStringLiteral("loopback")
                                 && descriptor.transport != QStringLiteral("loopback");
         if (bothSerial && !descriptor.config.portName.isEmpty()
             && session->config().portName.compare(descriptor.config.portName,
@@ -199,6 +200,18 @@ bool SessionService::setRts(const QString &sessionId, bool enabled, Error *error
     return true;
 }
 
+bool SessionService::setConnected(const QString &sessionId, bool connected, Error *error)
+{
+    SerialSession *session = findSession(sessionId);
+    if (!session) {
+        if (error) *error = Error::make(ErrorCode::NotFound, QStringLiteral("会话不存在"));
+        return false;
+    }
+    session->setConnected(connected);
+    publishState(session);
+    return true;
+}
+
 bool SessionService::reconfigure(const QString &sessionId, const SessionDescriptor &descriptor,
                                  Error *error)
 {
@@ -217,6 +230,10 @@ bool SessionService::reconfigure(const QString &sessionId, const SessionDescript
         if (error) *error = Error::make(ErrorCode::InvalidArgument, QStringLiteral("请选择有效串口"));
         return false;
     }
+    if (descriptor.config.baudRate <= 0) {
+        if (error) *error = Error::make(ErrorCode::InvalidArgument, QStringLiteral("波特率必须大于 0"));
+        return false;
+    }
     for (const SerialSession *other : m_sessions) {
         if (other == session) continue;
         if (other->name().compare(name, Qt::CaseInsensitive) == 0) {
@@ -224,7 +241,8 @@ bool SessionService::reconfigure(const QString &sessionId, const SessionDescript
                                             QStringLiteral("会话名“%1”已存在").arg(name));
             return false;
         }
-        const bool bothSerial = other->transport() != QStringLiteral("loopback")
+        const bool bothSerial = other->state() != SessionState::Closed
+                                && other->transport() != QStringLiteral("loopback")
                                 && descriptor.transport != QStringLiteral("loopback");
         if (bothSerial && other->config().portName.compare(descriptor.config.portName,
                                                            Qt::CaseInsensitive) == 0) {

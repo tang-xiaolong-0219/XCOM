@@ -28,6 +28,7 @@ public slots:
     void setDtr(bool enabled);
     void setRts(bool enabled);
     void reconfigure(const SessionDescriptor &descriptor);
+    void setDescriptor(const SessionDescriptor &descriptor);
 
 signals:
     void opened();
@@ -75,6 +76,7 @@ public:
     void setDtr(bool enabled);
     void setRts(bool enabled);
     void reconfigure(const SessionDescriptor &descriptor);
+    void setConnected(bool connected);
 
 signals:
     void openedSignal();
