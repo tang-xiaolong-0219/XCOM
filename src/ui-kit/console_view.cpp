@@ -2,8 +2,11 @@
 
 #include "xcom/api/commands.h"
 
+#include <QAbstractItemView>
 #include <QAbstractSpinBox>
 #include <QCheckBox>
+#include <QColor>
+#include <QComboBox>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -14,7 +17,9 @@
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPlainTextEdit>
+#include <QPalette>
 #include <QPushButton>
 #include <QSaveFile>
 #include <QScrollBar>
@@ -24,6 +29,7 @@
 #include <QStyle>
 #include <QStandardPaths>
 #include <QStringConverter>
+#include <QTextCharFormat>
 #include <QTextCursor>
 #include <QTimer>
 #include <QToolButton>
@@ -78,6 +84,7 @@ ConsoleView::ConsoleView(ISession *session, IViewHost *host, QWidget *parent)
 
     updateTitle();
     updateState();
+    refreshPortOptions();
     updateStats();
 }
 
@@ -85,6 +92,7 @@ ConsoleView::~ConsoleView()
 {
     m_timedTimer->stop();
     m_fileSendTimer->stop();
+    m_portRefreshTimer->stop();
     if (m_sendFile) m_sendFile->close();
     m_flushTimer->stop();
     if (m_subscription) {
@@ -102,11 +110,30 @@ void ConsoleView::buildUi()
     auto *topBar = new QHBoxLayout;
     topBar->setSpacing(8);
 
-    m_stateLabel = new QLabel(this);
-    m_stateLabel->setObjectName(QStringLiteral("sessionState"));
+    m_stateButton = new QPushButton(this);
+    m_stateButton->setObjectName(QStringLiteral("sessionState"));
+    m_stateButton->setFlat(true);
+    m_stateButton->setFocusPolicy(Qt::NoFocus);
+    m_stateButton->setCursor(Qt::PointingHandCursor);
+    m_stateButton->setToolTip(QStringLiteral("打开或关闭当前会话"));
+    m_portCombo = new QComboBox(this);
+    m_portCombo->setObjectName(QStringLiteral("consolePort"));
+    m_portCombo->setFixedWidth(142);
+    m_portCombo->setToolTip(QStringLiteral("切换当前会话使用的串口"));
+    m_baudCombo = new QComboBox(this);
+    m_baudCombo->setObjectName(QStringLiteral("consoleBaudRate"));
+    m_baudCombo->setEditable(true);
+    m_baudCombo->setFixedWidth(104);
+    for (int rate : {1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200,
+                     230400, 460800, 921600}) {
+        m_baudCombo->addItem(QString::number(rate), rate);
+    }
+    m_baudCombo->setToolTip(QStringLiteral("选择波特率；选择后立即应用，或输入后按 Enter"));
     m_statsLabel = new QLabel(this);
     m_statsLabel->setObjectName(QStringLiteral("sessionStats"));
 
+    m_showSendCheck = new QCheckBox(QStringLiteral("显示发送"), this);
+    m_showSendCheck->setToolTip(QStringLiteral("在接收区回显已发送的数据"));
     m_hexDisplayCheck = new QCheckBox(QStringLiteral("HEX 接收"), this);
     m_hexDisplayCheck->setToolTip(QStringLiteral("以十六进制显示接收数据"));
     m_timestampCheck = new QCheckBox(QStringLiteral("时间戳"), this);
@@ -117,9 +144,12 @@ void ConsoleView::buildUi()
     auto *clearButton = new QPushButton(QStringLiteral("清空"), this);
     auto *saveButton = new QPushButton(QStringLiteral("保存"), this);
 
-    topBar->addWidget(m_stateLabel);
+    topBar->addWidget(m_stateButton);
+    topBar->addWidget(m_portCombo);
+    topBar->addWidget(m_baudCombo);
     topBar->addWidget(m_statsLabel);
     topBar->addStretch();
+    topBar->addWidget(m_showSendCheck);
     topBar->addWidget(m_hexDisplayCheck);
     topBar->addWidget(m_timestampCheck);
     topBar->addWidget(m_autoScrollCheck);
@@ -226,8 +256,49 @@ void ConsoleView::buildUi()
     m_fileSendTimer->setSingleShot(true);
     connect(m_fileSendTimer, &QTimer::timeout, this, &ConsoleView::sendNextFileChunk);
 
+    m_portRefreshTimer = new QTimer(this);
+    m_portRefreshTimer->setInterval(1500);
+    connect(m_portRefreshTimer, &QTimer::timeout, this, &ConsoleView::refreshPortOptions);
+    m_portRefreshTimer->start();
+
     connect(clearButton, &QPushButton::clicked, this, &ConsoleView::clearDisplay);
     connect(saveButton, &QPushButton::clicked, this, &ConsoleView::saveToFile);
+    connect(m_stateButton, &QPushButton::clicked, this, [this] {
+        if (!m_session) return;
+        const bool connected = m_session->state() != SessionState::Open;
+        const CommandResult result = execute(
+            QStringLiteral("serial.setConnected"),
+            {{QStringLiteral("session"), m_session->id()},
+             {QStringLiteral("connected"), connected}});
+        if (!result.ok) showHint(result.message, true);
+    });
+    connect(m_portCombo, qOverload<int>(&QComboBox::activated), this, [this](int) {
+        if (!m_session) return;
+        const QString port = m_portCombo->currentData().toString();
+        const CommandResult result = execute(
+            QStringLiteral("serial.setPort"),
+            {{QStringLiteral("session"), m_session->id()},
+             {QStringLiteral("port"), port}});
+        if (!result.ok) {
+            showHint(result.message, true);
+            refreshPortOptions();
+        } else {
+            updateState();
+        }
+    });
+    auto applyBaudRate = [this] {
+        if (!m_session) return;
+        const int baudRate = m_baudCombo->currentText().trimmed().toInt();
+        const CommandResult result = execute(
+            QStringLiteral("serial.setBaudRate"),
+            {{QStringLiteral("session"), m_session->id()},
+             {QStringLiteral("baud"), baudRate}});
+        if (!result.ok) showHint(result.message, true);
+        updateState();
+    };
+    connect(m_baudCombo, qOverload<int>(&QComboBox::activated), this,
+            [applyBaudRate](int) { applyBaudRate(); });
+    connect(m_baudCombo->lineEdit(), &QLineEdit::returnPressed, this, applyBaudRate);
     connect(m_sendButton, &QPushButton::clicked, this, &ConsoleView::sendNow);
     connect(m_sendFileButton, &QPushButton::clicked, this, [this] {
         if (m_sendFile) stopFileSend(QStringLiteral("已停止文件发送"));
@@ -301,7 +372,7 @@ QString ConsoleView::sessionId() const
 
 void ConsoleView::onData(const DataChunk &chunk)
 {
-    if (!m_session || chunk.direction == Direction::Tx) {
+    if (!m_session || (chunk.direction == Direction::Tx && !m_showSendCheck->isChecked())) {
         return;
     }
     if (m_pauseCheck->isChecked()) {
@@ -338,12 +409,23 @@ void ConsoleView::flushPending()
     const QVector<DataChunk> chunks = m_pending;
     m_pending.clear();
 
-    QString text;
-    text.reserve(chunks.size() * 32);
+    QTextCursor cursor(m_receive->document());
+    cursor.movePosition(QTextCursor::End);
+    QTextCharFormat receiveFormat;
+    receiveFormat.setForeground(m_receive->palette().color(QPalette::Text));
+    QTextCharFormat transmitFormat = receiveFormat;
+    transmitFormat.setForeground(QColor(QStringLiteral("#4FC1FF")));
     for (const DataChunk &chunk : chunks) {
-        text += formatChunk(chunk);
+        const QString text = formatChunk(chunk);
+        if (!text.isEmpty()) {
+            cursor.insertText(text, chunk.direction == Direction::Tx
+                                        ? transmitFormat : receiveFormat);
+        }
     }
-    appendText(text);
+    if (m_autoScrollCheck->isChecked() && !m_pauseCheck->isChecked()) {
+        QScrollBar *bar = m_receive->verticalScrollBar();
+        bar->setValue(bar->maximum());
+    }
     updateStats();
 }
 
@@ -353,13 +435,24 @@ QString ConsoleView::formatChunk(const DataChunk &chunk)
     if (m_hexDisplayCheck->isChecked()) {
         body = QString::fromLatin1(chunk.bytes.toHex(' ')).toUpper();
         body.append(QLatin1Char('\n'));
+    } else if (chunk.direction == Direction::Tx) {
+        body = decodeTransmit(chunk.bytes);
     } else {
         body = decode(chunk.bytes);
     }
 
+    if (body.isEmpty() && !m_hexDisplayCheck->isChecked()) {
+        return {};
+    }
+
     QString result;
+    bool atLineStart = m_atLineStart;
+    if (!atLineStart) {
+        result.append(QLatin1Char('\n'));
+        atLineStart = true;
+    }
     if (m_timestampCheck->isChecked()) {
-        if (!m_atLineStart) {
+        if (!atLineStart) {
             result.append(QLatin1Char('\n'));
         }
         result.append(QStringLiteral("[%1] ")
@@ -367,6 +460,9 @@ QString ConsoleView::formatChunk(const DataChunk &chunk)
                                    .toString(QStringLiteral("HH:mm:ss.zzz"))));
     }
     result.append(body);
+    if (!result.endsWith(QLatin1Char('\n'))) {
+        result.append(QLatin1Char('\n'));
+    }
     m_atLineStart = result.endsWith(QLatin1Char('\n'));
     return result;
 }
@@ -384,16 +480,17 @@ QString ConsoleView::decode(const QByteArray &bytes)
     return text;
 }
 
-void ConsoleView::appendText(const QString &text)
+QString ConsoleView::decodeTransmit(const QByteArray &bytes) const
 {
-    QTextCursor cursor(m_receive->document());
-    cursor.movePosition(QTextCursor::End);
-    cursor.insertText(text);
-
-    if (m_autoScrollCheck->isChecked() && !m_pauseCheck->isChecked()) {
-        QScrollBar *bar = m_receive->verticalScrollBar();
-        bar->setValue(bar->maximum());
+    QStringConverter::Encoding converterEncoding = QStringConverter::System;
+    if (m_session && m_session->encoding() == QStringLiteral("utf8")) {
+        converterEncoding = QStringConverter::Utf8;
+    } else if (m_session && m_session->encoding() == QStringLiteral("latin1")) {
+        converterEncoding = QStringConverter::Latin1;
     }
+    QStringDecoder decoder(converterEncoding);
+    const QString text = decoder.decode(QByteArrayView(bytes));
+    return decoder.hasError() ? QString::fromLatin1(bytes) : text;
 }
 
 void ConsoleView::clearDisplay()
@@ -602,24 +699,35 @@ CommandResult ConsoleView::execute(const QString &commandId, const QVariantMap &
 void ConsoleView::updateState()
 {
     if (!m_session) {
-        m_stateLabel->setText(QStringLiteral("无会话"));
+        m_stateButton->setText(QStringLiteral("无会话"));
+        m_stateButton->setEnabled(false);
+        m_portCombo->setEnabled(false);
+        m_baudCombo->setEnabled(false);
         updateSendEnabled();
         return;
     }
     const SessionState state = m_session->state();
-    m_stateLabel->setText(QStringLiteral("%1 %2")
-                              .arg(sessionStateIcon(state), sessionStateName(state)));
-    m_stateLabel->setToolTip(QStringLiteral("%1 · %2 · %3 8N1")
+    m_stateButton->setText(QStringLiteral("%1 %2")
+                               .arg(sessionStateIcon(state), sessionStateName(state)));
+    m_stateButton->setEnabled(state != SessionState::Opening && state != SessionState::Closing);
+    m_portCombo->setEnabled(state != SessionState::Opening && state != SessionState::Closing);
+    m_stateButton->setToolTip(QStringLiteral("%1 · %2 · %3 8N1\n点击打开或关闭当前会话")
                                  .arg(m_session->name(),
                                       m_session->transport() == QStringLiteral("loopback")
                                           ? QStringLiteral("回环")
                                           : m_session->config().portName)
                                  .arg(m_session->config().baudRate));
     const PortConfig config = m_session->config();
+    m_baudCombo->setEnabled(state != SessionState::Opening && state != SessionState::Closing);
+    const QSignalBlocker baudBlocker(m_baudCombo);
+    const int baudIndex = m_baudCombo->findData(config.baudRate);
+    if (baudIndex >= 0) m_baudCombo->setCurrentIndex(baudIndex);
+    else m_baudCombo->setCurrentText(QString::number(config.baudRate));
     const QSignalBlocker dtrBlocker(m_dtrCheck);
     const QSignalBlocker rtsBlocker(m_rtsCheck);
     m_dtrCheck->setChecked(config.dtr);
     m_rtsCheck->setChecked(config.rts);
+    refreshPortOptions();
     updateSendEnabled();
 }
 
@@ -658,6 +766,33 @@ void ConsoleView::updateTitle()
     if (m_session) {
         setWindowTitle(m_session->name());
     }
+}
+
+void ConsoleView::refreshPortOptions()
+{
+    if (!m_session || !m_portCombo || m_portCombo->view()->isVisible()) return;
+
+    const CommandResult result = execute(
+        QStringLiteral("serial.listPorts"),
+        {{QStringLiteral("session"), m_session->id()}});
+    if (!result.ok) return;
+
+    const QString selected = m_session->transport() == QStringLiteral("loopback")
+                                 ? QStringLiteral("LOOPBACK")
+                                 : m_session->config().portName;
+    const QSignalBlocker blocker(m_portCombo);
+    m_portCombo->clear();
+    for (const QVariant &entry : result.data.value(QStringLiteral("ports")).toList()) {
+        const QVariantMap port = entry.toMap();
+        m_portCombo->addItem(port.value(QStringLiteral("label")).toString(),
+                             port.value(QStringLiteral("name")).toString());
+    }
+    if (!selected.isEmpty() && m_portCombo->findData(selected) < 0) {
+        m_portCombo->addItem(QStringLiteral("%1 (当前会话)").arg(selected), selected);
+    }
+    m_portCombo->addItem(QStringLiteral("回环测试"), QStringLiteral("LOOPBACK"));
+    const int selectedIndex = m_portCombo->findData(selected);
+    if (selectedIndex >= 0) m_portCombo->setCurrentIndex(selectedIndex);
 }
 
 void ConsoleView::showHint(const QString &text, bool error)

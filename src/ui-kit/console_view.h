@@ -9,6 +9,7 @@
 
 QT_BEGIN_NAMESPACE
 class QCheckBox;
+class QComboBox;
 class QFile;
 class QLabel;
 class QPlainTextEdit;
@@ -60,13 +61,14 @@ private:
     void applyTheme();
     void scheduleFlush();
     void flushPending();
-    void appendText(const QString &text);
     QString formatChunk(const DataChunk &chunk);
     QString decode(const QByteArray &bytes);
+    QString decodeTransmit(const QByteArray &bytes) const;
     void updateState();
     void updateStats();
     void updateSendEnabled();
     void updateTitle();
+    void refreshPortOptions();
     void sendNextFileChunk();
     void stopFileSend(const QString &message = QString(), bool error = false);
     void showHint(const QString &text, bool error = false);
@@ -82,6 +84,7 @@ private:
 
     QPlainTextEdit *m_receive = nullptr;
     QPlainTextEdit *m_send = nullptr;
+    QCheckBox *m_showSendCheck = nullptr;
     QCheckBox *m_hexDisplayCheck = nullptr;
     QCheckBox *m_timestampCheck = nullptr;
     QCheckBox *m_autoScrollCheck = nullptr;
@@ -94,13 +97,16 @@ private:
     QSpinBox *m_intervalSpin = nullptr;
     QPushButton *m_sendButton = nullptr;
     QPushButton *m_sendFileButton = nullptr;
-    QLabel *m_stateLabel = nullptr;
+    QPushButton *m_stateButton = nullptr;
+    QComboBox *m_portCombo = nullptr;
+    QComboBox *m_baudCombo = nullptr;
     QLabel *m_statsLabel = nullptr;
     QLabel *m_hintLabel = nullptr;
 
     QTimer *m_flushTimer = nullptr;
     QTimer *m_timedTimer = nullptr;
     QTimer *m_fileSendTimer = nullptr;
+    QTimer *m_portRefreshTimer = nullptr;
     QFile *m_sendFile = nullptr;
     qint64 m_fileBytesSent = 0;
     qint64 m_fileBytesTotal = 0;

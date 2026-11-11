@@ -76,6 +76,9 @@ QScrollBar::handle:horizontal { background: #424242; min-width: 24px; border-rad
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 QSplitter::handle { background: #3c3c3c; }
 QLabel#sessionState { color: #89d185; font-weight: 600; }
+QPushButton#sessionState { color: #89d185; font-weight: 600; background: transparent; border: none; padding: 0; text-align: left; }
+QPushButton#sessionState:hover { color: #89d185; background: transparent; }
+QPushButton#sessionState:disabled { color: #89d185; }
 QLabel#sessionStats { color: #9d9d9d; }
 QFrame#workspacePanelBar { background: #252526; border-bottom: 1px solid #3c3c3c; }
 QFrame#workspacePanelBar QToolButton {
